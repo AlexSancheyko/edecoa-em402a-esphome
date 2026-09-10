@@ -1,0 +1,639 @@
+substitutions:
+  device_name: edecoa-esp32
+  friendly_name: "EDECOA EM-402A"
+
+esphome:
+  name: ${device_name}
+  friendly_name: ${friendly_name}
+  comment: "EDECOA EM-402A via RS232 / HW-027 MAX3232"
+  project:
+    name: "alex.edecoa-em402a"
+    version: "6.5-auto-charge-range-probe"
+  on_boot:
+    priority: -100
+    then:
+      - delay: 10s
+      - lambda: |-
+          ESP_LOGI("range_probe", "AUTO PROBE: QMCHGCR");
+          id(inverter).queue_command("QMCHGCR");
+      - delay: 7s
+      - lambda: |-
+          ESP_LOGI("range_probe", "AUTO PROBE: QMUCHGCR");
+          id(inverter).queue_command("QMUCHGCR");
+
+esp32:
+  board: esp32-c3-devkitm-1
+  variant: esp32c3
+  framework:
+    type: esp-idf
+
+external_components:
+  - source: github://syssi/esphome-pipsolar@main
+    refresh: 0s
+
+# USB_SERIAL_JTAG keeps GPIO2/GPIO3 free for inverter UART.
+logger:
+  level: DEBUG
+  hardware_uart: USB_SERIAL_JTAG
+
+api:
+
+ota:
+  - platform: esphome
+
+wifi:
+  ssid: !secret wifi_ssid
+  password: !secret wifi_password
+  min_auth_mode: WPA2
+  power_save_mode: none
+
+  ap:
+    ssid: "EDECOA-EM402A-Fallback"
+
+captive_portal:
+
+web_server:
+  port: 80
+
+# ============================================================
+# RS232 UART
+# ESP32-C3 GPIO3 TX -> MAX3232 TTL input
+# ESP32-C3 GPIO2 RX <- MAX3232 TTL output
+# ============================================================
+
+uart:
+  id: inverter_uart
+  tx_pin: GPIO3
+  rx_pin: GPIO2
+  baud_rate: 2400
+  data_bits: 8
+  parity: NONE
+  stop_bits: 1
+  debug:
+    direction: BOTH
+    dummy_receiver: false
+    after:
+      timeout: 100ms
+    sequence:
+      - lambda: UARTDebug::log_string(direction, bytes, debug_prefix);
+
+pip2424mse1:
+  id: inverter
+  uart_id: inverter_uart
+
+# ============================================================
+# INVERTER TELEMETRY + QPIRI SETTINGS READBACK
+# ============================================================
+
+sensor:
+  - platform: pip2424mse1
+    pipsolar_id: inverter
+
+    # ---------------- QPIRI ----------------
+    grid_rating_voltage:
+      name: "${friendly_name} Номінальна вхідна напруга [GRID_RATED_V]"
+      entity_category: diagnostic
+
+    grid_rating_current:
+      name: "${friendly_name} Номінальний вхідний струм [GRID_RATED_A]"
+      entity_category: diagnostic
+
+    ac_output_rating_voltage:
+      name: "${friendly_name} Номінальна вихідна напруга [OUT_RATED_V]"
+      entity_category: diagnostic
+
+    ac_output_rating_frequency:
+      name: "${friendly_name} Номінальна вихідна частота [OUT_RATED_HZ]"
+      entity_category: diagnostic
+
+    ac_output_rating_current:
+      name: "${friendly_name} Номінальний вихідний струм [OUT_RATED_A]"
+      entity_category: diagnostic
+
+    ac_output_rating_apparent_power:
+      name: "${friendly_name} Номінальна повна потужність [OUT_RATED_VA]"
+      entity_category: diagnostic
+
+    ac_output_rating_active_power:
+      name: "${friendly_name} Номінальна активна потужність [OUT_RATED_W]"
+      entity_category: diagnostic
+
+    battery_rating_voltage:
+      name: "${friendly_name} Номінальна напруга АКБ [BAT_RATED_V]"
+      entity_category: diagnostic
+
+    battery_recharge_voltage:
+      name: "${friendly_name} Напруга повторного заряду [BAT_RECHARGE_V]"
+      entity_category: diagnostic
+
+    battery_under_voltage:
+      name: "${friendly_name} Нижній поріг АКБ [BAT_UNDER_V]"
+      entity_category: diagnostic
+
+    battery_bulk_voltage:
+      name: "${friendly_name} Напруга Bulk [BAT_BULK_V]"
+      entity_category: diagnostic
+
+    battery_float_voltage:
+      name: "${friendly_name} Напруга Float [BAT_FLOAT_V]"
+      entity_category: diagnostic
+
+    battery_type:
+      name: "${friendly_name} Тип АКБ [BAT_TYPE]"
+      entity_category: diagnostic
+
+    current_max_ac_charging_current:
+      name: "${friendly_name} Макс. струм заряду від мережі [MAX_AC_CHG_A]"
+      entity_category: diagnostic
+      on_value:
+        then:
+          - lambda: |-
+              char buf[12];
+              snprintf(buf, sizeof(buf), "%.0f A", x);
+              id(ac_charge_current_select).publish_state(buf);
+
+    current_max_charging_current:
+      name: "${friendly_name} Макс. сумарний струм заряду [MAX_TOTAL_CHG_A]"
+      entity_category: diagnostic
+      on_value:
+        then:
+          - lambda: |-
+              char buf[12];
+              snprintf(buf, sizeof(buf), "%.0f A", x);
+              id(total_charge_current_select).publish_state(buf);
+
+    input_voltage_range:
+      name: "${friendly_name} Діапазон вхідної AC напруги [AC_INPUT_RANGE]"
+      entity_category: diagnostic
+
+    output_source_priority:
+      name: "${friendly_name} Код пріоритету виходу [OUT_PRIORITY_CODE]"
+      entity_category: diagnostic
+
+    charger_source_priority:
+      name: "${friendly_name} Код пріоритету заряджання [CHG_PRIORITY_CODE]"
+      entity_category: diagnostic
+
+    parallel_max_num:
+      name: "${friendly_name} Максимум паралельних інверторів [PARALLEL_MAX]"
+      entity_category: diagnostic
+
+    machine_type:
+      name: "${friendly_name} Тип інвертора [MACHINE_TYPE]"
+      entity_category: diagnostic
+
+    topology:
+      name: "${friendly_name} Топологія [TOPOLOGY]"
+      entity_category: diagnostic
+
+    output_mode:
+      name: "${friendly_name} Режим виходу [OUTPUT_MODE]"
+      entity_category: diagnostic
+
+    battery_redischarge_voltage:
+      name: "${friendly_name} Напруга повернення на АКБ [BAT_REDISCHARGE_V]"
+      entity_category: diagnostic
+
+    pv_ok_condition_for_parallel:
+      name: "${friendly_name} PV OK condition код [PV_OK_CODE]"
+      entity_category: diagnostic
+
+    pv_power_balance:
+      name: "${friendly_name} PV Power Balance код [PV_BALANCE_CODE]"
+      entity_category: diagnostic
+
+    # ---------------- QPIGS ----------------
+    grid_voltage:
+      name: "${friendly_name} Напруга мережі [GRID_V]"
+      device_class: voltage
+      state_class: measurement
+
+    grid_frequency:
+      name: "${friendly_name} Частота мережі [GRID_HZ]"
+      device_class: frequency
+      state_class: measurement
+
+    ac_output_voltage:
+      name: "${friendly_name} Вихідна напруга [OUT_V]"
+      device_class: voltage
+      state_class: measurement
+
+    ac_output_frequency:
+      name: "${friendly_name} Вихідна частота [OUT_HZ]"
+      device_class: frequency
+      state_class: measurement
+
+    ac_output_apparent_power:
+      name: "${friendly_name} Повна вихідна потужність [OUT_VA]"
+      state_class: measurement
+
+    ac_output_active_power:
+      name: "${friendly_name} Активна вихідна потужність [OUT_W]"
+      id: inverter_output_power
+      device_class: power
+      state_class: measurement
+
+    output_load_percent:
+      name: "${friendly_name} Навантаження [LOAD_PCT]"
+      state_class: measurement
+
+    bus_voltage:
+      name: "${friendly_name} Напруга DC шини [BUS_V]"
+      device_class: voltage
+      state_class: measurement
+
+    battery_voltage:
+      name: "${friendly_name} Напруга АКБ [BAT_V]"
+      device_class: voltage
+      state_class: measurement
+
+    battery_charging_current:
+      name: "${friendly_name} Струм заряду АКБ [BAT_CHG_A]"
+      device_class: current
+      state_class: measurement
+
+    battery_capacity_percent:
+      name: "${friendly_name} SOC АКБ оцінка інвертора [BAT_SOC_EST]"
+      device_class: battery
+      state_class: measurement
+      entity_category: diagnostic
+
+    inverter_heat_sink_temperature:
+      name: "${friendly_name} Температура інвертора [INV_TEMP]"
+      device_class: temperature
+      state_class: measurement
+
+    pv_input_current_for_battery:
+      name: "${friendly_name} Струм PV [PV_A]"
+      device_class: current
+      state_class: measurement
+
+    pv_input_voltage:
+      name: "${friendly_name} Напруга PV [PV_V]"
+      device_class: voltage
+      state_class: measurement
+
+    battery_voltage_scc:
+      name: "${friendly_name} Напруга АКБ від SCC [SCC_BAT_V]"
+      device_class: voltage
+      state_class: measurement
+
+    battery_discharge_current:
+      name: "${friendly_name} Струм розряду АКБ [BAT_DISCH_A]"
+      device_class: current
+      state_class: measurement
+
+    battery_voltage_offset_for_fans_on:
+      name: "${friendly_name} Поріг вентилятора АКБ [FAN_BAT_OFFSET]"
+      entity_category: diagnostic
+
+    pv_charging_power:
+      name: "${friendly_name} Потужність PV [PV_W]"
+      id: inverter_pv_power
+      device_class: power
+      state_class: measurement
+
+  # Local ESP32 diagnostics
+  - platform: wifi_signal
+    name: "${friendly_name} WiFi RSSI [WIFI_RSSI]"
+    update_interval: 60s
+    entity_category: diagnostic
+
+  - platform: uptime
+    name: "${friendly_name} Uptime [UPTIME]"
+    update_interval: 60s
+    entity_category: diagnostic
+
+# ============================================================
+# RAW PROTOCOL + MODE
+# ============================================================
+
+text_sensor:
+  - platform: pip2424mse1
+    pipsolar_id: inverter
+
+    device_mode:
+      name: "${friendly_name} Режим роботи [MODE]"
+      filters:
+        - map:
+            - "P -> Увімкнення"
+            - "S -> Очікування"
+            - "L -> Мережа"
+            - "B -> АКБ"
+            - "F -> Аварія"
+            - "D -> Вимкнення"
+
+    last_qpigs:
+      name: "${friendly_name} QPIGS raw [QPIGS_RAW]"
+      entity_category: diagnostic
+      disabled_by_default: true
+
+    last_qpiri:
+      name: "${friendly_name} QPIRI raw [QPIRI_RAW]"
+      entity_category: diagnostic
+      disabled_by_default: true
+
+    last_qmod:
+      name: "${friendly_name} QMOD raw [QMOD_RAW]"
+      entity_category: diagnostic
+      disabled_by_default: true
+
+    last_qflag:
+      name: "${friendly_name} QFLAG raw [QFLAG_RAW]"
+      entity_category: diagnostic
+      disabled_by_default: true
+
+
+  - platform: wifi_info
+    ip_address:
+      name: "${friendly_name} IP [IP_ADDRESS]"
+      entity_category: diagnostic
+    ssid:
+      name: "${friendly_name} WiFi SSID [WIFI_SSID]"
+      entity_category: diagnostic
+    mac_address:
+      name: "${friendly_name} MAC [MAC_ADDRESS]"
+      entity_category: diagnostic
+
+# ============================================================
+# INVERTER STATUS FLAGS
+# ============================================================
+
+binary_sensor:
+  - platform: pip2424mse1
+    pipsolar_id: inverter
+
+    add_sbu_priority_version:
+      name: "${friendly_name} SBU priority version [SBU_VERSION]"
+      entity_category: diagnostic
+
+    configuration_status:
+      name: "${friendly_name} Конфігурація активна [CFG_ACTIVE]"
+      entity_category: diagnostic
+
+    load_status:
+      name: "${friendly_name} Навантаження увімкнене [LOAD_ON]"
+
+    battery_voltage_to_steady_while_charging:
+      name: "${friendly_name} Стабілізація напруги АКБ [BAT_STEADY]"
+      entity_category: diagnostic
+
+    charging_status:
+      name: "${friendly_name} Заряджання [CHARGING]"
+
+    scc_charging_status:
+      name: "${friendly_name} Заряджання від PV [PV_CHARGING]"
+
+    ac_charging_status:
+      name: "${friendly_name} Заряджання від мережі [AC_CHARGING]"
+
+    charging_to_floating_mode:
+      name: "${friendly_name} Float режим [FLOAT_MODE]"
+
+    switch_on:
+      name: "${friendly_name} Інвертор увімкнений [INV_ON]"
+
+    silence_buzzer_open_buzzer:
+      name: "${friendly_name} Buzzer flag [BUZZER_FLAG]"
+      entity_category: diagnostic
+
+    overload_bypass_function:
+      name: "${friendly_name} Overload bypass flag [OVERLOAD_BYPASS_FLAG]"
+      entity_category: diagnostic
+
+    lcd_escape_to_default:
+      name: "${friendly_name} LCD auto return flag [LCD_RETURN_FLAG]"
+      entity_category: diagnostic
+
+    overload_restart_function:
+      name: "${friendly_name} Overload restart flag [OVERLOAD_RESTART_FLAG]"
+      entity_category: diagnostic
+
+    over_temperature_restart_function:
+      name: "${friendly_name} Overtemperature restart flag [OVERTEMP_RESTART_FLAG]"
+      entity_category: diagnostic
+
+
+
+
+  - platform: status
+    name: "${friendly_name} ESP32 Online [ESP_ONLINE]"
+    entity_category: diagnostic
+
+# ============================================================
+# HOME ASSISTANT CONTROLS
+#
+# IMPORTANT:
+# This EDECOA rejects the pip2424mse1 default AC command format
+# MUCHGC0xxx (example: MUCHGC0010).
+#
+# For AC current we therefore queue the older/shorter protocol form
+# directly through pip2424mse1 itself:
+#   2 A  -> MUCHGC002
+#   10 A -> MUCHGC010
+#   ...
+#   80 A -> MUCHGC080
+#
+# queue_command() is part of pip2424mse1, so CRC and UART arbitration
+# remain handled by the component.
+#
+# TOTAL current protocol:
+#   <=100 A -> MCHGC<nnn>  (example MCHGC060)
+#   >100 A  -> MNCHGC<mnnn>, where m is parallel inverter number.
+#              For a single inverter we probe/use m=0, so 110 A -> MNCHGC0110.
+#
+# On every boot this debug build automatically sends the read-only queries
+# QMCHGCR and QMUCHGCR. Their raw replies are visible in UART DEBUG.
+#
+# QBATCD-related entities are intentionally removed because this EDECOA
+# does not answer QBATCD; removing them avoids a 5-second timeout every cycle.
+# ============================================================
+
+select:
+  # -------- Main requirement: AC/grid charge current --------
+  - platform: template
+    id: ac_charge_current_select
+    name: "${friendly_name} Струм заряду від мережі [AC_CHARGE_CURRENT]"
+    entity_category: config
+    optimistic: true
+    restore_value: false
+    options:
+      - "2 A"
+      - "10 A"
+      - "20 A"
+      - "30 A"
+      - "40 A"
+      - "50 A"
+      - "60 A"
+      - "70 A"
+      - "80 A"
+    set_action:
+      - lambda: |-
+          if (x == "2 A") {
+            id(inverter).queue_command("MUCHGC002");
+          } else if (x == "10 A") {
+            id(inverter).queue_command("MUCHGC010");
+          } else if (x == "20 A") {
+            id(inverter).queue_command("MUCHGC020");
+          } else if (x == "30 A") {
+            id(inverter).queue_command("MUCHGC030");
+          } else if (x == "40 A") {
+            id(inverter).queue_command("MUCHGC040");
+          } else if (x == "50 A") {
+            id(inverter).queue_command("MUCHGC050");
+          } else if (x == "60 A") {
+            id(inverter).queue_command("MUCHGC060");
+          } else if (x == "70 A") {
+            id(inverter).queue_command("MUCHGC070");
+          } else if (x == "80 A") {
+            id(inverter).queue_command("MUCHGC080");
+          }
+
+  # -------- Total battery charging current: PV + AC --------
+  - platform: template
+    id: total_charge_current_select
+    name: "${friendly_name} Сумарний струм заряду [TOTAL_CHARGE_CURRENT]"
+    entity_category: config
+    optimistic: true
+    restore_value: false
+    options:
+      - "10 A"
+      - "20 A"
+      - "30 A"
+      - "40 A"
+      - "50 A"
+      - "60 A"
+      - "70 A"
+      - "80 A"
+      - "90 A"
+      - "100 A"
+      - "110 A"
+    set_action:
+      - lambda: |-
+          if (x == "10 A") {
+            id(inverter).queue_command("MCHGC010");
+          } else if (x == "20 A") {
+            id(inverter).queue_command("MCHGC020");
+          } else if (x == "30 A") {
+            id(inverter).queue_command("MCHGC030");
+          } else if (x == "40 A") {
+            id(inverter).queue_command("MCHGC040");
+          } else if (x == "50 A") {
+            id(inverter).queue_command("MCHGC050");
+          } else if (x == "60 A") {
+            id(inverter).queue_command("MCHGC060");
+          } else if (x == "70 A") {
+            id(inverter).queue_command("MCHGC070");
+          } else if (x == "80 A") {
+            id(inverter).queue_command("MCHGC080");
+          } else if (x == "90 A") {
+            id(inverter).queue_command("MCHGC090");
+          } else if (x == "100 A") {
+            id(inverter).queue_command("MCHGC100");
+          } else if (x == "110 A") {
+            id(inverter).queue_command("MNCHGC0110");
+          }
+
+  # -------- Native pip2424mse1 selects --------
+  - platform: pip2424mse1
+    pipsolar_id: inverter
+
+    output_source_priority:
+      name: "${friendly_name} Пріоритет живлення [OUT_PRIORITY]"
+      entity_category: config
+      optionsmap:
+        "Мережа першою": "POP00"
+        "Сонце першою": "POP01"
+        "SBU Сонце-АКБ-Мережа": "POP02"
+      statusmap:
+        "0": "Мережа першою"
+        "1": "Сонце першою"
+        "2": "SBU Сонце-АКБ-Мережа"
+
+    charger_source_priority:
+      name: "${friendly_name} Пріоритет заряджання [CHG_PRIORITY]"
+      entity_category: config
+      optionsmap:
+        "Сонце першою": "PCP01"
+        "Сонце і мережа": "PCP02"
+        "Тільки сонце": "PCP03"
+      statusmap:
+        "1": "Сонце першою"
+        "2": "Сонце і мережа"
+        "3": "Тільки сонце"
+
+
+# ============================================================
+# OPTIONAL INVERTER SWITCHES
+# Disabled by default where behaviour isn't needed day-to-day.
+# ============================================================
+
+switch:
+  - platform: pip2424mse1
+    pipsolar_id: inverter
+
+    output_source_priority_utility:
+      name: "${friendly_name} Режим Utility first [UTILITY_FIRST_SW]"
+      entity_category: config
+      disabled_by_default: true
+
+    output_source_priority_solar:
+      name: "${friendly_name} Режим Solar first [SOLAR_FIRST_SW]"
+      entity_category: config
+      disabled_by_default: true
+
+    output_source_priority_battery:
+      name: "${friendly_name} Режим SBU [SBU_SW]"
+      entity_category: config
+      disabled_by_default: true
+
+    input_voltage_range:
+      name: "${friendly_name} Вузький діапазон AC - UPS [AC_RANGE_SW]"
+      entity_category: config
+      disabled_by_default: true
+
+    pv_ok_condition_for_parallel:
+      name: "${friendly_name} PV OK condition [PV_OK_SW]"
+      entity_category: config
+      disabled_by_default: true
+
+    pv_power_balance:
+      name: "${friendly_name} PV Power Balance [PV_BALANCE_SW]"
+      entity_category: config
+      disabled_by_default: true
+
+# ============================================================
+# ESP32 MAINTENANCE
+# ============================================================
+
+button:
+  - platform: restart
+    name: "${friendly_name} Перезавантажити ESP32 [RESTART]"
+    entity_category: diagnostic
+
+  - platform: safe_mode
+    name: "${friendly_name} Safe Mode [SAFE_MODE]"
+    entity_category: diagnostic
+
+  # ==========================================================
+  # PROTOCOL DIAGNOSTICS: supported charge-current ranges
+  # These are read-only queries. The raw inverter response is
+  # visible in UART DEBUG.
+  #
+  # QMCHGCR  = supported TOTAL charging-current values
+  # QMUCHGCR = supported AC/utility charging-current values
+  # ==========================================================
+  - platform: template
+    name: "${friendly_name} Запит доступних TOTAL струмів [QMCHGCR]"
+    entity_category: diagnostic
+    on_press:
+      - lambda: |-
+          id(inverter).queue_command("QMCHGCR");
+
+  - platform: template
+    name: "${friendly_name} Запит доступних AC струмів [QMUCHGCR]"
+    entity_category: diagnostic
+    on_press:
+      - lambda: |-
+          id(inverter).queue_command("QMUCHGCR");
+
