@@ -1,0 +1,9 @@
+secrets.yaml
+.esphome/
+*.log
+*.bin
+*.elf
+*.map
+.vscode/
+.DS_Store
+Thumbs.db
